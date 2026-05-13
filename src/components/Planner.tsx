@@ -72,8 +72,33 @@ export function Planner({
     (latlng: LatLng) => {
       if (playMode) return;
       const id = makeId();
-      setPins((prev) => [...prev, { id, name: "", lat: latlng.lat, lng: latlng.lng }]);
+      setPins((prev) => [
+        ...prev,
+        { id, name: "", caption: null, lat: latlng.lat, lng: latlng.lng },
+      ]);
       setActivePinId(id);
+
+      // Reverse-geocode in the background to pre-fill the name + caption.
+      void fetch(`/api/geocode?lat=${latlng.lat}&lng=${latlng.lng}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: { name?: string; caption?: string } | null) => {
+          if (!data) return;
+          setPins((prev) =>
+            prev.map((p) =>
+              p.id === id
+                ? {
+                    ...p,
+                    // Only overwrite name if user hasn't typed one yet.
+                    name: p.name.trim() === "" ? (data.name ?? "") : p.name,
+                    caption: data.caption ?? null,
+                  }
+                : p,
+            ),
+          );
+        })
+        .catch(() => {
+          /* swallow — geocoder is best-effort */
+        });
     },
     [playMode],
   );
@@ -81,8 +106,28 @@ export function Planner({
     (id: string, latlng: LatLng) => {
       if (playMode) return;
       setPins((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, lat: latlng.lat, lng: latlng.lng } : p)),
+        prev.map((p) =>
+          p.id === id ? { ...p, lat: latlng.lat, lng: latlng.lng, caption: null } : p,
+        ),
       );
+      // Re-geocode at the new position.
+      void fetch(`/api/geocode?lat=${latlng.lat}&lng=${latlng.lng}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: { name?: string; caption?: string } | null) => {
+          if (!data) return;
+          setPins((prev) =>
+            prev.map((p) =>
+              p.id === id
+                ? {
+                    ...p,
+                    name: p.name.trim() === "" ? (data.name ?? "") : p.name,
+                    caption: data.caption ?? null,
+                  }
+                : p,
+            ),
+          );
+        })
+        .catch(() => {});
     },
     [playMode],
   );
@@ -311,7 +356,7 @@ function BuilderSidebar({
             {pins.map((pin, i) => (
               <li
                 key={pin.id}
-                className={`group flex items-center gap-2 rounded-2xl border p-2 pl-3 transition ${
+                className={`group flex items-start gap-2 rounded-2xl border p-2 pl-3 transition ${
                   pin.id === activePinId
                     ? "border-stone-900 bg-stone-50 dark:border-stone-50 dark:bg-stone-950"
                     : "border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"
@@ -320,19 +365,24 @@ function BuilderSidebar({
                 <button
                   type="button"
                   onClick={() => onSelectPin(pin.id)}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-900 text-xs font-semibold text-white dark:bg-stone-50 dark:text-stone-900"
+                  className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-900 text-xs font-semibold text-white dark:bg-stone-50 dark:text-stone-900"
                   aria-label={`Focus stop ${i + 1}`}
                 >
                   {i + 1}
                 </button>
-                <input
-                  value={pin.name}
-                  onChange={(e) => onRenamePin(pin.id, e.target.value)}
-                  onFocus={() => onSelectPin(pin.id)}
-                  placeholder="Name this stop (optional)"
-                  className="min-w-0 flex-1 bg-transparent px-1 py-1 text-sm text-stone-900 placeholder-stone-400 outline-none dark:text-stone-50"
-                />
-                <div className="flex shrink-0 gap-0.5 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+                <div className="min-w-0 flex-1">
+                  <input
+                    value={pin.name}
+                    onChange={(e) => onRenamePin(pin.id, e.target.value)}
+                    onFocus={() => onSelectPin(pin.id)}
+                    placeholder={pin.name === "" && pin.caption === null ? "Finding place…" : "Name this stop"}
+                    className="block w-full bg-transparent px-1 py-1 text-sm font-medium text-stone-900 placeholder-stone-400 outline-none dark:text-stone-50"
+                  />
+                  {pin.caption && (
+                    <p className="px-1 text-xs italic text-stone-500">{pin.caption}</p>
+                  )}
+                </div>
+                <div className="mt-1 flex shrink-0 gap-0.5 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
                   <button
                     type="button"
                     onClick={() => onMoveUp(pin.id)}

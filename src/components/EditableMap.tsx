@@ -5,7 +5,12 @@ import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
 import { ATLAS_STYLE, numberedPinIcon } from "@/lib/map-style";
 import type { LatLng } from "@/lib/types";
 
-export type Pin = LatLng & { id: string; name: string };
+export type Pin = LatLng & {
+  id: string;
+  name: string;
+  /** Reverse-geocoded "Region, Country" caption — null while in flight. */
+  caption?: string | null;
+};
 
 export function EditableMap({
   apiKey,
