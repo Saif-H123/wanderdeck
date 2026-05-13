@@ -4,6 +4,27 @@
 const FULL_CREDIT_M = 200;
 const ZERO_CREDIT_M = 2_000;
 
+// Activity grade is lenient on purpose — the game is about getting to the
+// stop and snapping *something* relevant, not photographic perfection.
+// Anything Claude marks as a match gets at least this much credit.
+export const ACTIVITY_MATCH_THRESHOLD = 0.35;
+const ACTIVITY_FLOOR_ON_MATCH = 0.7;
+
+export function gradeActivity(input: {
+  matches: boolean;
+  confidence: number;
+}): { activityScore: number; matches: boolean } {
+  const conf = clamp01(input.confidence);
+  const matched = input.matches && conf >= ACTIVITY_MATCH_THRESHOLD;
+  if (!matched) return { activityScore: 0, matches: false };
+  return { activityScore: Math.max(ACTIVITY_FLOOR_ON_MATCH, conf), matches: true };
+}
+
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
 export function locationFactor(distanceMeters: number | null): number {
   if (distanceMeters === null) return 0;
   if (distanceMeters <= FULL_CREDIT_M) return 1;

@@ -41,8 +41,8 @@ Both the photo and the player's location grade together — a perfect photo from
 awarded_points = base_points × activity_score × location_factor
 ```
 
-- `activity_score` — Claude vision's 0–1 judgement of how well the photo satisfies the card's criteria (Gemini does a cheap reject-pass first).
-- `location_factor` — 1.0 within 200m of the stop, decays linearly to 0 by 2km, hard zero beyond. The closer of (browser geolocation at upload) vs (EXIF GPS in the photo) is used as the distance signal; if both are missing, the location factor is 0.
+- `activity_score` — lenient. Gemini does a cheap reject-pass for obvious wrong-subject submissions. Anything Claude then judges as a match (≥0.35 confidence) gets at least 0.7 credit, capped at 1.0. The game rewards getting there with something relevant, not photographic perfection.
+- `location_factor` — strict. 1.0 within 200m of the stop, decays linearly to 0 by 2km, hard zero beyond. The closer of (browser geolocation at upload) vs (EXIF GPS in the photo) is used as the distance signal; if both are missing, the location factor is 0.
 
 Required env keys (see `.env.example`):
 

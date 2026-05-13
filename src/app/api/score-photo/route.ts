@@ -3,7 +3,7 @@ import { z } from "zod";
 import exifr from "exifr";
 import { classifyPhoto } from "@/lib/ai/gemini";
 import { scorePhoto } from "@/lib/ai/claude";
-import { bestDistanceMeters, computeAwardedPoints } from "@/lib/scoring";
+import { bestDistanceMeters, computeAwardedPoints, gradeActivity } from "@/lib/scoring";
 
 const LatLng = z.object({
   lat: z.number().min(-90).max(90),
@@ -81,12 +81,15 @@ export async function POST(req: NextRequest) {
     .join("");
 
   const parsedJudgement = parseClaudeJson(judgementText);
-  const activityScore = clamp01(parsedJudgement.confidence ?? 0);
-  const matches = parsedJudgement.matches ?? activityScore >= 0.5;
+  const claudeMatches = parsedJudgement.matches ?? (parsedJudgement.confidence ?? 0) >= 0.35;
+  const { activityScore, matches } = gradeActivity({
+    matches: claudeMatches,
+    confidence: parsedJudgement.confidence ?? 0,
+  });
 
   const { awardedPoints, locationScore } = computeAwardedPoints({
     basePoints: card.basePoints,
-    activityScore: matches ? activityScore : 0,
+    activityScore,
     distanceMeters,
   });
 
@@ -99,11 +102,6 @@ export async function POST(req: NextRequest) {
     photoLocation,
     reasoning: parsedJudgement.reasoning ?? judgementText.slice(0, 500),
   });
-}
-
-function clamp01(n: number): number {
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(1, n));
 }
 
 function parseClaudeJson(raw: string): ClaudeJudgement {
