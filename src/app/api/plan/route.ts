@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { generateActivityCards } from "@/lib/ai/claude";
 import { createTrip } from "@/lib/db/trips";
+import { getCurrentUser } from "@/lib/auth";
 
 export const maxDuration = 120;
 
@@ -34,10 +35,12 @@ export async function POST(req: NextRequest) {
       );
     }
     const plan = result.parsed_output;
+    const user = await getCurrentUser();
     const { slug } = await createTrip({
       vibe: parsed.data.vibe,
       pins: parsed.data.stops,
       plan,
+      userId: user?.id ?? null,
     });
     return Response.json({ slug, plan });
   } catch (err) {

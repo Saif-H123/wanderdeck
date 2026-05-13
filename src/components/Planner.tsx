@@ -31,10 +31,12 @@ export function Planner({
   apiKey,
   initialTrip,
   initialSubmissions,
+  userMenu,
 }: {
   apiKey: string | null;
   initialTrip?: StoredTrip;
   initialSubmissions?: StoredSubmission[];
+  userMenu?: React.ReactNode;
 }) {
   const router = useRouter();
   const playMode = !!initialTrip;
@@ -285,14 +287,17 @@ export function Planner({
           >
             wanderdeck
           </Link>
-          {playMode && (
-            <div className="pointer-events-auto rounded-2xl bg-white/85 px-4 py-2 shadow-lg backdrop-blur dark:bg-stone-900/85">
-              <p className="text-xs font-medium uppercase tracking-wider text-stone-500">Score</p>
-              <p className="font-display text-2xl font-semibold text-stone-900 dark:text-stone-50">
-                {totalScore}
-              </p>
-            </div>
-          )}
+          <div className="flex items-start gap-3">
+            {playMode && (
+              <div className="pointer-events-auto rounded-2xl bg-white/85 px-4 py-2 shadow-lg backdrop-blur dark:bg-stone-900/85">
+                <p className="text-xs font-medium uppercase tracking-wider text-stone-500">Score</p>
+                <p className="font-display text-2xl font-semibold text-stone-900 dark:text-stone-50">
+                  {totalScore}
+                </p>
+              </div>
+            )}
+            {userMenu && <div className="pointer-events-auto">{userMenu}</div>}
+          </div>
         </div>
       </div>
 

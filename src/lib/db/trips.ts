@@ -9,6 +9,8 @@ type CreateInput = {
   vibe: string;
   pins: { name: string; lat: number; lng: number }[];
   plan: GeneratedPlan;
+  /** Owner of the trip — null for anonymous (no signed-in user). */
+  userId: string | null;
 };
 
 export type StoredTrip = {
@@ -55,7 +57,7 @@ export type StoredSubmission = {
  * Persist a generated plan to Supabase. Returns the slug for the new trip.
  * One trip + N stops + N*M cards inserted; rolls back on any error.
  */
-export async function createTrip({ vibe, pins, plan }: CreateInput): Promise<{ slug: string }> {
+export async function createTrip({ vibe, pins, plan, userId }: CreateInput): Promise<{ slug: string }> {
   if (pins.length !== plan.stops.length) {
     throw new Error("pins.length must match plan.stops.length");
   }
@@ -68,6 +70,7 @@ export async function createTrip({ vibe, pins, plan }: CreateInput): Promise<{ s
       slug,
       prompt: vibe,
       status: "planning",
+      user_id: userId,
       origin_label: pins[0]?.name || plan.stops[0]?.placeName || "",
       origin_lat: pins[0]?.lat ?? 0,
       origin_lng: pins[0]?.lng ?? 0,
@@ -214,11 +217,34 @@ export async function getTripBySlug(
 }
 
 /**
+ * List trips owned by the given user. Newest first.
+ */
+export async function getUserTrips(userId: string): Promise<
+  Array<{ slug: string; vibe: string; createdAt: string; stopCount: number }>
+> {
+  const sb = supabaseServer();
+  const { data, error } = await sb
+    .from("trips")
+    .select("slug, prompt, created_at, trip_stops(id)")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((t) => ({
+    slug: t.slug,
+    vibe: t.prompt,
+    createdAt: t.created_at,
+    stopCount: Array.isArray(t.trip_stops) ? t.trip_stops.length : 0,
+  }));
+}
+
+/**
  * Insert a card_submission row + upload the photo bytes to the
  * card-photos storage bucket. Path is `submissions/<submission-id>.<ext>`.
  */
 export async function recordSubmission(input: {
   cardId: string;
+  userId: string | null;
   matches: boolean;
   activityScore: number;
   locationScore: number;
@@ -240,6 +266,7 @@ export async function recordSubmission(input: {
     .from("card_submissions")
     .insert({
       card_id: input.cardId,
+      user_id: input.userId,
       photo_path: "pending",
       matches: input.matches,
       confidence: input.activityScore,

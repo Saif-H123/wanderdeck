@@ -6,6 +6,7 @@ import { scorePhoto } from "@/lib/ai/claude";
 import { bestDistanceMeters, computeAwardedPoints, gradeActivity } from "@/lib/scoring";
 import { supabaseServer } from "@/lib/db/supabase";
 import { recordSubmission } from "@/lib/db/trips";
+import { getCurrentUser } from "@/lib/auth";
 
 export const maxDuration = 60;
 
@@ -100,8 +101,10 @@ export async function POST(req: NextRequest) {
 
   // Persist the submission + upload photo.
   try {
+    const user = await getCurrentUser();
     const stored = await recordSubmission({
       cardId,
+      userId: user?.id ?? null,
       matches: matches && awardedPoints > 0,
       activityScore,
       locationScore,

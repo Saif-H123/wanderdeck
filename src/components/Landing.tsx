@@ -6,7 +6,13 @@ import { WorldMap } from "./WorldMap";
 import { LocationPanel } from "./LocationPanel";
 import { FEATURED_LOCATIONS, type FeaturedLocation } from "@/lib/seed-locations";
 
-export function Landing({ apiKey }: { apiKey: string | null }) {
+export function Landing({
+  apiKey,
+  userMenu,
+}: {
+  apiKey: string | null;
+  userMenu?: React.ReactNode;
+}) {
   const [selected, setSelected] = useState<FeaturedLocation | null>(null);
   const handleSelect = useCallback((loc: FeaturedLocation) => setSelected(loc), []);
   const handleClose = useCallback(() => setSelected(null), []);
@@ -25,6 +31,13 @@ export function Landing({ apiKey }: { apiKey: string | null }) {
           <MapFallback onSelect={handleSelect} />
         )}
       </div>
+
+      {/* Top-right user menu */}
+      {userMenu && (
+        <div className="pointer-events-none absolute right-0 top-0 z-20 p-4 sm:p-6">
+          <div className="pointer-events-auto">{userMenu}</div>
+        </div>
+      )}
 
       {/* Hero overlay (top-left, doesn't block the map) */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 px-6 pt-8 sm:px-10 sm:pt-12">

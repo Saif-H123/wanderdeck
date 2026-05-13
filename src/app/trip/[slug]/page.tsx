@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { Planner } from "@/components/Planner";
+import { UserMenu } from "@/components/UserMenu";
 import { getTripBySlug } from "@/lib/db/trips";
 
 export default async function TripPage(props: PageProps<"/trip/[slug]">) {
@@ -9,5 +10,12 @@ export default async function TripPage(props: PageProps<"/trip/[slug]">) {
   const data = await getTripBySlug(slug);
   if (!data) return notFound();
 
-  return <Planner apiKey={apiKey} initialTrip={data.trip} initialSubmissions={data.submissions} />;
+  return (
+    <Planner
+      apiKey={apiKey}
+      initialTrip={data.trip}
+      initialSubmissions={data.submissions}
+      userMenu={<UserMenu />}
+    />
+  );
 }
