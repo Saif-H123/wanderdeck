@@ -5,6 +5,8 @@ import { classifyPhoto } from "@/lib/ai/gemini";
 import { scorePhoto } from "@/lib/ai/claude";
 import { bestDistanceMeters, computeAwardedPoints, gradeActivity } from "@/lib/scoring";
 
+export const maxDuration = 60;
+
 const LatLng = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
@@ -21,12 +23,6 @@ const Body = z.object({
   stop: LatLng,
   uploadLocation: LatLng.nullable(),
 });
-
-type ClaudeJudgement = {
-  matches?: boolean;
-  confidence?: number;
-  reasoning?: string;
-};
 
 export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json());
@@ -48,15 +44,14 @@ export async function POST(req: NextRequest) {
     photo: photoLocation,
   });
 
-  // Cheap first-pass: if Gemini is confident the photo isn't even
-  // the right subject, skip the (more expensive) Claude judgement.
+  // Cheap first-pass: if Gemini is confident the photo isn't the right
+  // subject, skip the (more expensive) Claude judgement.
   const firstPass = await classifyPhoto({
     imageBase64,
     mimeType,
     expectedSubject: card.title,
-  });
-  const firstPassText = (firstPass.text ?? "").toLowerCase();
-  if (firstPassText.includes('"plausible": false')) {
+  }).catch(() => null);
+  if (firstPass?.text?.toLowerCase().includes('"plausible": false')) {
     const { awardedPoints, locationScore } = computeAwardedPoints({
       basePoints: card.basePoints,
       activityScore: 0,
@@ -69,24 +64,30 @@ export async function POST(req: NextRequest) {
       awardedPoints,
       distanceMeters,
       photoLocation,
-      reasoning: "First-pass classifier rejected: photo doesn't appear to show the expected subject.",
+      reasoning: "Quick first-pass: the photo doesn't appear to show the expected subject.",
     });
   }
 
-  // Activity grade from Claude vision.
-  const judgement = await scorePhoto({ imageBase64, mimeType, card });
-  const judgementText = judgement.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("");
+  let judgement;
+  try {
+    judgement = await scorePhoto({ imageBase64, mimeType, card });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return Response.json({ error: message }, { status: 500 });
+  }
 
-  const parsedJudgement = parseClaudeJson(judgementText);
-  const claudeMatches = parsedJudgement.matches ?? (parsedJudgement.confidence ?? 0) >= 0.35;
+  if (!judgement.parsed_output) {
+    return Response.json(
+      { error: "Model returned malformed judgement", stopReason: judgement.stop_reason },
+      { status: 502 },
+    );
+  }
+
+  const { matches: claudeMatches, confidence, reasoning } = judgement.parsed_output;
   const { activityScore, matches } = gradeActivity({
     matches: claudeMatches,
-    confidence: parsedJudgement.confidence ?? 0,
+    confidence,
   });
-
   const { awardedPoints, locationScore } = computeAwardedPoints({
     basePoints: card.basePoints,
     activityScore,
@@ -100,19 +101,6 @@ export async function POST(req: NextRequest) {
     awardedPoints,
     distanceMeters,
     photoLocation,
-    reasoning: parsedJudgement.reasoning ?? judgementText.slice(0, 500),
+    reasoning,
   });
-}
-
-function parseClaudeJson(raw: string): ClaudeJudgement {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = fenced ? fenced[1] : raw;
-  const firstBrace = body.indexOf("{");
-  const lastBrace = body.lastIndexOf("}");
-  if (firstBrace === -1 || lastBrace === -1) return {};
-  try {
-    return JSON.parse(body.slice(firstBrace, lastBrace + 1));
-  } catch {
-    return {};
-  }
 }

@@ -1,26 +1,54 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import type { GeneratedPlan } from "@/lib/ai/claude";
 
 export default function PlanPage() {
+  return (
+    <Suspense fallback={null}>
+      <PlanForm />
+    </Suspense>
+  );
+}
+
+function PlanForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [prompt, setPrompt] = useState("");
   const [origin, setOrigin] = useState("");
   const [destination, setDestination] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<unknown>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const to = searchParams.get("to");
+    if (to) setDestination(to);
+  }, [searchParams]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    setResult(null);
+    setError(null);
     try {
       const res = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, origin, destination }),
       });
-      setResult(await res.json());
-    } finally {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error?.message ?? body.error ?? `Plan failed (${res.status})`);
+      }
+      const { plan } = (await res.json()) as { plan: GeneratedPlan };
+      const slug = makeSlug();
+      sessionStorage.setItem(
+        `trip:${slug}`,
+        JSON.stringify({ plan, origin, destination, prompt, createdAt: Date.now() }),
+      );
+      router.push(`/trip/${slug}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
       setLoading(false);
     }
   }
@@ -65,16 +93,24 @@ export default function PlanPage() {
             disabled={loading}
             className="w-full rounded-full bg-stone-900 py-3 text-sm font-medium text-white disabled:opacity-50 dark:bg-stone-50 dark:text-stone-900"
           >
-            {loading ? "Planning…" : "Generate itinerary"}
+            {loading ? "Planning your trip…" : "Generate itinerary"}
           </button>
+          {loading && (
+            <p className="text-center text-xs text-stone-500">
+              Claude is sketching stops and cards. This usually takes 20–40 seconds.
+            </p>
+          )}
+          {error && (
+            <p className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
+              {error}
+            </p>
+          )}
         </form>
-
-        {result !== null && (
-          <pre className="mt-8 overflow-auto rounded-xl bg-stone-100 p-4 text-xs dark:bg-stone-900 dark:text-stone-200">
-            {JSON.stringify(result, null, 2)}
-          </pre>
-        )}
       </div>
     </main>
   );
+}
+
+function makeSlug(): string {
+  return Math.random().toString(36).slice(2, 10);
 }
