@@ -21,6 +21,25 @@ type ScoreMap = Record<string, ScoreResult>; // keyed by card.id
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
+type CostLeg = {
+  index: number;
+  fromAirport: { iata: string; city: string; country: string } | null;
+  toAirport: { iata: string; city: string; country: string } | null;
+  status: "estimated" | "no-offers" | "no-airport" | "drivable" | "error";
+  distanceKm: number;
+  price: number | null;
+  currency: string | null;
+  carrier: string | null;
+  message?: string;
+};
+
+type CostEstimate = {
+  legs: CostLeg[];
+  total: number | null;
+  currency: string | null;
+  departureDate: string;
+};
+
 const OPENER: ChatMessage = {
   role: "assistant",
   content:
@@ -56,6 +75,10 @@ export function Planner({
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Cost estimate is fetched (debounced) whenever pins change.
+  const [costEstimate, setCostEstimate] = useState<CostEstimate | null>(null);
+  const [costLoading, setCostLoading] = useState(false);
+
   // ---------- Play-mode state ----------
   const [revealed, setRevealed] = useState<RevealedSet>(new Set());
   const [scores, setScores] = useState<ScoreMap>(() => {
@@ -79,6 +102,34 @@ export function Planner({
     return m;
   });
   const [uploading, setUploading] = useState<{ cardId: string } | null>(null);
+
+  // Debounced cost estimate. Re-runs when the relevant pin coordinates
+  // change (we depend on a hash of lat/lng pairs to avoid re-firing on
+  // unrelated state churn like rename).
+  const pinKey = pins.map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join("|");
+  useEffect(() => {
+    if (playMode) return;
+    if (pins.length < 2) {
+      setCostEstimate(null);
+      return;
+    }
+    const handle = setTimeout(() => {
+      setCostLoading(true);
+      fetch("/api/cost-estimate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pins: pins.map((p) => ({ lat: p.lat, lng: p.lng })),
+        }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: CostEstimate | null) => setCostEstimate(data))
+        .catch(() => setCostEstimate(null))
+        .finally(() => setCostLoading(false));
+    }, 1200);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinKey, playMode]);
 
   const handleAddPin = useCallback(
     (latlng: LatLng) => {
@@ -312,6 +363,8 @@ export function Planner({
             chatReady={chatReady}
             generating={generating}
             error={error}
+            costEstimate={costEstimate}
+            costLoading={costLoading}
             onSelectPin={setActivePinId}
             onRenamePin={handleRenamePin}
             onDeletePin={handleDeletePin}
@@ -381,6 +434,8 @@ function BuilderSidebar({
   chatReady,
   generating,
   error,
+  costEstimate,
+  costLoading,
   onSelectPin,
   onRenamePin,
   onDeletePin,
@@ -396,6 +451,8 @@ function BuilderSidebar({
   chatReady: boolean;
   generating: boolean;
   error: string | null;
+  costEstimate: CostEstimate | null;
+  costLoading: boolean;
   onSelectPin: (id: string) => void;
   onRenamePin: (id: string, name: string) => void;
   onDeletePin: (id: string) => void;
@@ -416,15 +473,20 @@ function BuilderSidebar({
       </header>
 
       <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+        {pins.length >= 2 && (
+          <CostTotalRow estimate={costEstimate} loading={costLoading} />
+        )}
+
         {pins.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 p-4 text-sm text-stone-600 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-400">
             Tap anywhere on the map to drop a stop. Add as many as you like — the more specific, the
             better the cards.
           </p>
         ) : (
-          <ol className="space-y-2">
+          <div className="space-y-2">
             {pins.map((pin, i) => (
-              <li
+              <div key={`group-${pin.id}`} className="space-y-2">
+            <div
                 key={pin.id}
                 className={`group flex items-start gap-2 rounded-2xl border p-2 pl-3 transition ${
                   pin.id === activePinId
@@ -486,9 +548,16 @@ function BuilderSidebar({
                     </svg>
                   </button>
                 </div>
-              </li>
+                </div>
+                {i < pins.length - 1 && (
+                  <CostBetweenRow
+                    leg={costEstimate?.legs[i]}
+                    loading={costLoading && !costEstimate}
+                  />
+                )}
+              </div>
             ))}
-          </ol>
+          </div>
         )}
 
         <ChatPanel
@@ -634,6 +703,131 @@ function ChatPanel({
       </div>
     </div>
   );
+}
+
+// =============================================================
+// Cost UI: total + per-leg rows
+// =============================================================
+
+function formatMoney(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    return `${currency} ${amount.toFixed(0)}`;
+  }
+}
+
+function CostTotalRow({
+  estimate,
+  loading,
+}: {
+  estimate: CostEstimate | null;
+  loading: boolean;
+}) {
+  if (!estimate && !loading) return null;
+  return (
+    <div className="flex items-center justify-between rounded-2xl border border-stone-200 bg-gradient-to-br from-stone-50 to-stone-100 px-4 py-3 dark:border-stone-800 dark:from-stone-900 dark:to-stone-950">
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wider text-stone-500">
+          Estimated flights
+        </p>
+        <p className="font-display mt-0.5 text-2xl font-semibold text-stone-900 dark:text-stone-50">
+          {loading && !estimate
+            ? "…"
+            : estimate?.total != null && estimate.currency
+              ? formatMoney(estimate.total, estimate.currency)
+              : "—"}
+        </p>
+      </div>
+      <div className="text-right text-[10px] uppercase tracking-wider text-stone-400">
+        <p>
+          {estimate?.legs.filter((l) => l.status === "estimated").length ?? 0} priced legs
+        </p>
+        {estimate && (
+          <p className="mt-0.5">
+            Dep. {estimate.departureDate}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CostBetweenRow({
+  leg,
+  loading,
+}: {
+  leg: CostLeg | undefined;
+  loading: boolean;
+}) {
+  // Subtle divider style — sits between two pins.
+  const base =
+    "ml-3.5 flex items-center gap-3 border-l border-dashed border-stone-300 px-3 py-1.5 text-xs dark:border-stone-700";
+
+  if (!leg && loading) {
+    return (
+      <div className={`${base} text-stone-400`}>
+        <span className="inline-flex gap-0.5">
+          <span className="h-1 w-1 animate-bounce rounded-full bg-stone-400 [animation-delay:-0.3s]" />
+          <span className="h-1 w-1 animate-bounce rounded-full bg-stone-400 [animation-delay:-0.15s]" />
+          <span className="h-1 w-1 animate-bounce rounded-full bg-stone-400" />
+        </span>
+        <span>Pricing leg…</span>
+      </div>
+    );
+  }
+  if (!leg) {
+    return <div className={`${base} text-stone-400`}>—</div>;
+  }
+
+  switch (leg.status) {
+    case "estimated":
+      return (
+        <div className={`${base} text-stone-700 dark:text-stone-300`}>
+          <span className="text-stone-400">✈</span>
+          <span>
+            {leg.fromAirport?.iata} → {leg.toAirport?.iata}
+          </span>
+          <span className="ml-auto font-display text-sm font-semibold text-stone-900 dark:text-stone-50">
+            {leg.price != null && leg.currency ? formatMoney(leg.price, leg.currency) : "—"}
+          </span>
+        </div>
+      );
+    case "drivable":
+      return (
+        <div className={`${base} text-stone-500`}>
+          <span className="text-stone-400">🚗</span>
+          <span>{leg.message}</span>
+        </div>
+      );
+    case "no-offers":
+      return (
+        <div className={`${base} text-amber-700 dark:text-amber-300`}>
+          <span>✈</span>
+          <span>
+            {leg.fromAirport?.iata}→{leg.toAirport?.iata}: no test offers
+          </span>
+        </div>
+      );
+    case "no-airport":
+      return (
+        <div className={`${base} text-stone-500`}>
+          <span>?</span>
+          <span>No major airport nearby</span>
+        </div>
+      );
+    case "error":
+      return (
+        <div className={`${base} text-red-700 dark:text-red-300`}>
+          <span>!</span>
+          <span>{leg.message ?? "Pricing failed"}</span>
+        </div>
+      );
+  }
 }
 
 // =============================================================
