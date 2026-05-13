@@ -33,6 +33,17 @@ Schema lives in [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_i
 
 The schema has four tables (`trips`, `trip_stops`, `activity_cards`, `card_submissions`) with RLS so users only see their own trips, plus a private `card-photos` storage bucket scoped by `auth.uid()` folder prefix.
 
+### Scoring
+
+Both the photo and the player's location grade together — a perfect photo from the wrong side of the country is worth nothing.
+
+```
+awarded_points = base_points × activity_score × location_factor
+```
+
+- `activity_score` — Claude vision's 0–1 judgement of how well the photo satisfies the card's criteria (Gemini does a cheap reject-pass first).
+- `location_factor` — 1.0 within 200m of the stop, decays linearly to 0 by 2km, hard zero beyond. The closer of (browser geolocation at upload) vs (EXIF GPS in the photo) is used as the distance signal; if both are missing, the location factor is 0.
+
 Required env keys (see `.env.example`):
 
 - `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` + `GOOGLE_MAPS_SERVER_KEY`
@@ -55,9 +66,13 @@ src/
     ai/claude.ts          itinerary + photo scoring
     ai/gemini.ts          first-pass image classification
     db/supabase.ts        client/server Supabase clients
+    geo.ts                haversine distance
+    scoring.ts            location factor + combined award
     types.ts              Trip / TripStop / ActivityCard / CardSubmission
 supabase/
-  migrations/0001_init.sql  schema + RLS + storage bucket
+  migrations/
+    0001_init.sql               schema + RLS + storage bucket
+    0002_slugs_and_location.sql  trip slugs + location grading columns
 ```
 
 ## Status

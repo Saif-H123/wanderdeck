@@ -4,6 +4,7 @@ export type TripStatus = "planning" | "active" | "completed" | "abandoned";
 
 export type Trip = {
   id: string;
+  slug: string;
   userId: string;
   prompt: string;
   status: TripStatus;
@@ -42,8 +43,13 @@ export type CardSubmission = {
   photoPath: string;
   matches: boolean;
   confidence: number;
+  activityScore: number;
+  locationScore: number;
   awardedPoints: number;
   aiReasoning: string;
+  uploadLocation: LatLng | null;
+  photoLocation: LatLng | null;
+  distanceMeters: number | null;
   submittedAt: string;
 };
 
