@@ -10,6 +10,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-serif: var(--font-fraunces);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,5 +23,31 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+}
+
+/* Display headings use Fraunces — adds editorial character without taking
+   over body copy. opsz=120 keeps it readable at large sizes; SOFT=80 is
+   slightly softer than the default. */
+.font-display {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-optical-sizing: auto;
+  font-variation-settings: "opsz" 120, "SOFT" 80;
+  letter-spacing: -0.025em;
+}
+
+/* Subtle slide-in for sidebar contents on mount. */
+@keyframes wd-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: wd-fade-in-up 0.4s ease-out both;
 }

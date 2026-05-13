@@ -177,14 +177,16 @@ export function Planner({
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4 sm:p-6">
           <Link
             href="/"
-            className="pointer-events-auto rounded-2xl bg-white/85 px-4 py-2 text-sm font-semibold tracking-tight shadow-lg backdrop-blur dark:bg-stone-900/85 dark:text-stone-50"
+            className="font-display pointer-events-auto rounded-2xl bg-white/85 px-4 py-2 text-base font-semibold tracking-tight shadow-lg backdrop-blur transition hover:bg-white dark:bg-stone-900/85 dark:text-stone-50"
           >
             wanderdeck
           </Link>
           {playMode && (
             <div className="pointer-events-auto rounded-2xl bg-white/85 px-4 py-2 shadow-lg backdrop-blur dark:bg-stone-900/85">
               <p className="text-xs font-medium uppercase tracking-wider text-stone-500">Score</p>
-              <p className="text-xl font-semibold text-stone-900 dark:text-stone-50">{totalScore}</p>
+              <p className="font-display text-2xl font-semibold text-stone-900 dark:text-stone-50">
+                {totalScore}
+              </p>
             </div>
           )}
         </div>
@@ -293,7 +295,7 @@ function BuilderSidebar({
     <div className="flex h-full flex-col overflow-hidden">
       <header className="border-b border-stone-200 px-6 py-5 dark:border-stone-800">
         <p className="text-xs font-medium uppercase tracking-wider text-stone-500">Build your trip</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
+        <h1 className="font-display mt-1 text-3xl font-semibold text-stone-900 dark:text-stone-50">
           Drop pins, then tell us the vibe.
         </h1>
       </header>
@@ -469,15 +471,17 @@ function PlayerSidebar({
       <div className="flex-1 overflow-y-auto px-6 py-5">
         {activePin && activeStop ? (
           <>
-            <p className="text-xs font-medium uppercase tracking-wider text-stone-500">
-              Stop {activeStop.sequence + 1}
-            </p>
-            <h2 className="mt-1 text-2xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
-              {activeStop.name}
-            </h2>
-            <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
-              {activeStop.description}
-            </p>
+            <div key={activePin.id} className="animate-fade-in-up">
+              <p className="text-xs font-medium uppercase tracking-wider text-stone-500">
+                Stop {activeStop.sequence + 1}
+              </p>
+              <h2 className="font-display mt-1 text-3xl font-semibold text-stone-900 dark:text-stone-50">
+                {activeStop.name}
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-stone-600 dark:text-stone-400">
+                {activeStop.description}
+              </p>
+            </div>
 
             <div className="mt-5 space-y-3">
               {activeStop.cards.map((card) => (
@@ -562,101 +566,160 @@ function Card({
     );
   };
 
-  if (!revealed) {
-    if (gate.status === "too-far") {
-      const dist =
-        gate.distanceMeters > 1000
-          ? `${(gate.distanceMeters / 1000).toFixed(1)} km`
-          : `${Math.round(gate.distanceMeters)} m`;
-      return (
-        <div className="rounded-2xl border-2 border-dashed border-amber-300 bg-amber-50 p-5 dark:border-amber-700 dark:bg-amber-950/40">
-          <p className="text-xs font-medium uppercase tracking-wider text-amber-700 dark:text-amber-300">
-            Not close enough yet
-          </p>
-          <p className="mt-2 text-base italic text-stone-700 dark:text-stone-300">
-            &ldquo;{card.hiddenHint}&rdquo;
-          </p>
-          <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
-            You&rsquo;re about <strong>{dist}</strong> away. Get within {REVEAL_RADIUS_M}m of the
-            stop to flip this card.
-          </p>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              onClick={handleRevealClick}
-              className="rounded-full border border-amber-700/40 px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-300/40 dark:text-amber-200 dark:hover:bg-amber-900/40"
-            >
-              Check again
-            </button>
-            <button
-              type="button"
-              onClick={onReveal}
-              className="rounded-full px-3 py-1.5 text-xs font-medium text-amber-900/70 underline-offset-2 hover:underline dark:text-amber-200/70"
-            >
-              Reveal anyway (won&rsquo;t score)
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    if (gate.status === "no-location") {
-      return (
-        <div className="rounded-2xl border-2 border-dashed border-stone-300 bg-stone-50 p-5 dark:border-stone-700 dark:bg-stone-950">
-          <p className="text-xs font-medium uppercase tracking-wider text-stone-400">Hidden card</p>
-          <p className="mt-2 text-base italic text-stone-700 dark:text-stone-300">
-            &ldquo;{card.hiddenHint}&rdquo;
-          </p>
-          <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">{gate.reason}</p>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              onClick={handleRevealClick}
-              className="rounded-full border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
-            >
-              Try again
-            </button>
-            <button
-              type="button"
-              onClick={onReveal}
-              className="rounded-full px-3 py-1.5 text-xs font-medium text-stone-500 underline-offset-2 hover:underline"
-            >
-              Reveal anyway
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <button
-        type="button"
-        onClick={handleRevealClick}
-        disabled={gate.status === "checking"}
-        className="group block w-full rounded-2xl border-2 border-dashed border-stone-300 bg-stone-50 p-5 text-left transition hover:border-stone-500 hover:bg-stone-100 disabled:opacity-60 dark:border-stone-700 dark:bg-stone-950 dark:hover:bg-stone-800"
+  // Both faces render at all times — the parent rotates Y 180° when
+  // `revealed` flips, and backface-visibility hides whichever face is
+  // facing away. Grid keeps the two faces stacked in the same cell so
+  // the wrapper sizes to the larger of the two.
+  return (
+    <div className="[perspective:1200px]">
+      <div
+        className={`grid w-full transition-transform duration-700 [transform-style:preserve-3d] ${
+          revealed ? "[transform:rotateY(180deg)]" : ""
+        }`}
       >
-        <p className="text-xs font-medium uppercase tracking-wider text-stone-400">
-          {gate.status === "checking" ? "Checking your location…" : "Hidden card · tap when you arrive"}
+        {/* FRONT FACE — hidden card variants */}
+        <div className="col-start-1 row-start-1 [backface-visibility:hidden]">
+          <FrontFace card={card} gate={gate} onCheck={handleRevealClick} onForceReveal={onReveal} />
+        </div>
+
+        {/* BACK FACE — revealed card */}
+        <div className="col-start-1 row-start-1 [backface-visibility:hidden] [transform:rotateY(180deg)]">
+          <BackFace card={card} score={score} onPhoto={onPhoto} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FrontFace({
+  card,
+  gate,
+  onCheck,
+  onForceReveal,
+}: {
+  card: StoredTrip["stops"][number]["cards"][number];
+  gate:
+    | { status: "idle" }
+    | { status: "checking" }
+    | { status: "too-far"; distanceMeters: number }
+    | { status: "no-location"; reason: string };
+  onCheck: () => void;
+  onForceReveal: () => void;
+}) {
+  if (gate.status === "too-far") {
+    const dist =
+      gate.distanceMeters > 1000
+        ? `${(gate.distanceMeters / 1000).toFixed(1)} km`
+        : `${Math.round(gate.distanceMeters)} m`;
+    return (
+      <div className="rounded-2xl border-2 border-dashed border-amber-300 bg-amber-50 p-5 dark:border-amber-700 dark:bg-amber-950/40">
+        <p className="text-xs font-medium uppercase tracking-wider text-amber-700 dark:text-amber-300">
+          Not close enough yet
         </p>
-        <p className="mt-2 text-base italic text-stone-700 dark:text-stone-300">
+        <p className="mt-2 font-display text-lg italic text-stone-800 dark:text-stone-200">
           &ldquo;{card.hiddenHint}&rdquo;
         </p>
-        <p className="mt-3 text-xs text-stone-400">{card.basePoints} pts</p>
-      </button>
+        <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
+          You&rsquo;re about <strong>{dist}</strong> away. Get within {REVEAL_RADIUS_M}m of the stop
+          to flip this card.
+        </p>
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            onClick={onCheck}
+            className="rounded-full border border-amber-700/40 px-3 py-1.5 text-xs font-medium text-amber-900 transition hover:bg-amber-100 dark:border-amber-300/40 dark:text-amber-200 dark:hover:bg-amber-900/40"
+          >
+            Check again
+          </button>
+          <button
+            type="button"
+            onClick={onForceReveal}
+            className="rounded-full px-3 py-1.5 text-xs font-medium text-amber-900/70 underline-offset-2 hover:underline dark:text-amber-200/70"
+          >
+            Reveal anyway (won&rsquo;t score)
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (gate.status === "no-location") {
+    return (
+      <div className="rounded-2xl border-2 border-dashed border-stone-300 bg-stone-50 p-5 dark:border-stone-700 dark:bg-stone-950">
+        <p className="text-xs font-medium uppercase tracking-wider text-stone-400">Hidden card</p>
+        <p className="mt-2 font-display text-lg italic text-stone-800 dark:text-stone-200">
+          &ldquo;{card.hiddenHint}&rdquo;
+        </p>
+        <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">{gate.reason}</p>
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            onClick={onCheck}
+            className="rounded-full border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+          >
+            Try again
+          </button>
+          <button
+            type="button"
+            onClick={onForceReveal}
+            className="rounded-full px-3 py-1.5 text-xs font-medium text-stone-500 underline-offset-2 hover:underline"
+          >
+            Reveal anyway
+          </button>
+        </div>
+      </div>
     );
   }
 
   return (
-    <div className="rounded-2xl border border-stone-200 bg-white p-5 dark:border-stone-800 dark:bg-stone-950">
+    <button
+      type="button"
+      onClick={onCheck}
+      disabled={gate.status === "checking"}
+      className="group relative flex h-full min-h-[220px] w-full flex-col justify-between overflow-hidden rounded-2xl border border-stone-300 bg-gradient-to-br from-stone-50 to-stone-100 p-5 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-stone-400 hover:shadow-md disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-sm dark:border-stone-700 dark:from-stone-900 dark:to-stone-950 dark:hover:border-stone-500"
+    >
+      {/* Decorative pattern — a faint paper texture hinting "card back" */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-40 [background:radial-gradient(circle_at_20%_20%,rgba(120,113,108,0.22),transparent_45%),radial-gradient(circle_at_85%_85%,rgba(120,113,108,0.18),transparent_50%),repeating-linear-gradient(45deg,transparent,transparent_24px,rgba(120,113,108,0.06)_24px,rgba(120,113,108,0.06)_25px)]"
+      />
+      <p className="relative text-xs font-medium uppercase tracking-wider text-stone-500">
+        {gate.status === "checking" ? "Checking your location…" : "Hidden · tap when you arrive"}
+      </p>
+      <p className="relative font-display text-xl italic leading-snug text-stone-800 dark:text-stone-200">
+        &ldquo;{card.hiddenHint}&rdquo;
+      </p>
+      <p className="relative text-xs font-medium tracking-wide text-stone-500">
+        {card.basePoints} pts
+      </p>
+    </button>
+  );
+}
+
+function BackFace({
+  card,
+  score,
+  onPhoto,
+}: {
+  card: StoredTrip["stops"][number]["cards"][number];
+  score?: ScoreResult;
+  onPhoto: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm dark:border-stone-800 dark:bg-stone-950">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-base font-medium text-stone-900 dark:text-stone-50">{card.title}</p>
-        <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-400">
+        <p className="font-display text-lg font-semibold text-stone-900 dark:text-stone-50">
+          {card.title}
+        </p>
+        <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-400">
           {card.basePoints} pts
         </span>
       </div>
-      <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">{card.revealedDescription}</p>
-      <p className="mt-3 text-xs text-stone-500">
-        <span className="font-medium uppercase tracking-wider">Photo brief:</span>{" "}
+      <p className="mt-2 text-sm leading-relaxed text-stone-600 dark:text-stone-400">
+        {card.revealedDescription}
+      </p>
+      <p className="mt-3 text-xs leading-relaxed text-stone-500">
+        <span className="font-semibold uppercase tracking-wider">Photo brief:</span>{" "}
         {card.scoringCriteria}
       </p>
 

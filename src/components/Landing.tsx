@@ -32,7 +32,7 @@ export function Landing({ apiKey }: { apiKey: string | null }) {
           <p className="text-xs font-medium uppercase tracking-wider text-stone-500">
             wanderdeck
           </p>
-          <h1 className="text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-50 sm:text-4xl">
+          <h1 className="font-display text-4xl font-semibold text-stone-900 dark:text-stone-50 sm:text-5xl">
             Pick a place. Find out what to do when you get there.
           </h1>
           <p className="text-sm text-stone-600 dark:text-stone-400">
