@@ -1,71 +1,100 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { EditableMap, type Pin } from "./EditableMap";
 import { PhotoUploadModal, type ScoreResult } from "./PhotoUploadModal";
-import type { GeneratedPlan } from "@/lib/ai/claude";
 import type { LatLng } from "@/lib/types";
+import type { StoredTrip, StoredSubmission } from "@/lib/db/trips";
 import { haversineMeters } from "@/lib/geo";
 
 // Reveal is allowed within this radius of the stop. Looser than the
-// full-credit scoring radius (200m) — gives the player a bit of slack
-// to flip the card without being right on top of the spot.
+// full-credit scoring radius (200m) so players have a bit of slack to
+// flip the card without standing right on the spot.
 const REVEAL_RADIUS_M = 500;
-
-type RevealedMap = Record<string, Record<number, boolean>>;
-type ScoreMap = Record<string, Record<number, ScoreResult>>;
 
 const makeId = () => Math.random().toString(36).slice(2, 10);
 
-export function Planner({ apiKey }: { apiKey: string | null }) {
-  const [pins, setPins] = useState<Pin[]>([]);
-  const [activePinId, setActivePinId] = useState<string | null>(null);
-  const [vibe, setVibe] = useState("");
-  const [plan, setPlan] = useState<GeneratedPlan | null>(null);
+type RevealedSet = Set<string>; // set of card.id strings
+type ScoreMap = Record<string, ScoreResult>; // keyed by card.id
+
+export function Planner({
+  apiKey,
+  initialTrip,
+  initialSubmissions,
+}: {
+  apiKey: string | null;
+  initialTrip?: StoredTrip;
+  initialSubmissions?: StoredSubmission[];
+}) {
+  const router = useRouter();
+  const playMode = !!initialTrip;
+
+  // ---------- Build-mode state ----------
+  const [pins, setPins] = useState<Pin[]>(() =>
+    initialTrip
+      ? initialTrip.stops.map((s) => ({ id: s.id, name: s.name, lat: s.lat, lng: s.lng }))
+      : [],
+  );
+  const [activePinId, setActivePinId] = useState<string | null>(
+    initialTrip?.stops[0]?.id ?? null,
+  );
+  const [vibe, setVibe] = useState(initialTrip?.vibe ?? "");
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState<RevealedMap>({});
-  const [scores, setScores] = useState<ScoreMap>({});
-  const [uploading, setUploading] = useState<{ pinId: string; cardIdx: number } | null>(null);
 
-  const editable = plan === null;
+  // ---------- Play-mode state ----------
+  const [revealed, setRevealed] = useState<RevealedSet>(new Set());
+  const [scores, setScores] = useState<ScoreMap>(() => {
+    if (!initialSubmissions) return {};
+    const m: ScoreMap = {};
+    for (const s of initialSubmissions) {
+      // Keep the best score per card.
+      const existing = m[s.cardId];
+      if (!existing || existing.awardedPoints < s.awardedPoints) {
+        m[s.cardId] = {
+          matches: s.matches,
+          activityScore: s.activityScore,
+          locationScore: s.locationScore,
+          awardedPoints: s.awardedPoints,
+          distanceMeters: s.distanceMeters,
+          photoLocation: null,
+          reasoning: s.reasoning,
+        };
+      }
+    }
+    return m;
+  });
+  const [uploading, setUploading] = useState<{ cardId: string } | null>(null);
 
   const handleAddPin = useCallback(
     (latlng: LatLng) => {
-      if (!editable) return;
+      if (playMode) return;
       const id = makeId();
-      setPins((prev) => [
-        ...prev,
-        { id, name: "", lat: latlng.lat, lng: latlng.lng },
-      ]);
+      setPins((prev) => [...prev, { id, name: "", lat: latlng.lat, lng: latlng.lng }]);
       setActivePinId(id);
     },
-    [editable],
+    [playMode],
   );
-
   const handleMovePin = useCallback(
     (id: string, latlng: LatLng) => {
-      if (!editable) return;
+      if (playMode) return;
       setPins((prev) =>
         prev.map((p) => (p.id === id ? { ...p, lat: latlng.lat, lng: latlng.lng } : p)),
       );
     },
-    [editable],
+    [playMode],
   );
-
   const handleSelectPin = useCallback((id: string) => setActivePinId(id), []);
 
-  const handleRenamePin = (id: string, name: string) => {
+  const handleRenamePin = (id: string, name: string) =>
     setPins((prev) => prev.map((p) => (p.id === id ? { ...p, name } : p)));
-  };
-
   const handleDeletePin = (id: string) => {
     setPins((prev) => prev.filter((p) => p.id !== id));
     if (activePinId === id) setActivePinId(null);
   };
-
-  const movePinUp = (id: string) => {
+  const movePinUp = (id: string) =>
     setPins((prev) => {
       const idx = prev.findIndex((p) => p.id === id);
       if (idx <= 0) return prev;
@@ -73,9 +102,7 @@ export function Planner({ apiKey }: { apiKey: string | null }) {
       [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
       return next;
     });
-  };
-
-  const movePinDown = (id: string) => {
+  const movePinDown = (id: string) =>
     setPins((prev) => {
       const idx = prev.findIndex((p) => p.id === id);
       if (idx === -1 || idx === prev.length - 1) return prev;
@@ -83,7 +110,6 @@ export function Planner({ apiKey }: { apiKey: string | null }) {
       [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
       return next;
     });
-  };
 
   const handleGenerate = async () => {
     if (pins.length < 1 || vibe.trim().length < 5) return;
@@ -102,52 +128,31 @@ export function Planner({ apiKey }: { apiKey: string | null }) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error?.message ?? body.error ?? `Failed (${res.status})`);
       }
-      const { plan: newPlan } = (await res.json()) as { plan: GeneratedPlan };
-      setPlan(newPlan);
-      // Carry Claude's placeName back onto the pin names if the user left them blank.
-      setPins((prev) =>
-        prev.map((p, i) =>
-          p.name.trim() === "" && newPlan.stops[i]
-            ? { ...p, name: newPlan.stops[i].placeName }
-            : p,
-        ),
-      );
+      const { slug } = (await res.json()) as { slug: string };
+      router.push(`/trip/${slug}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
       setGenerating(false);
     }
   };
 
-  const handleReset = () => {
-    setPins([]);
-    setActivePinId(null);
-    setVibe("");
-    setPlan(null);
-    setRevealed({});
-    setScores({});
-    setError(null);
-  };
-
-  const totalScore = useMemo(() => {
-    let s = 0;
-    for (const byPin of Object.values(scores)) {
-      for (const r of Object.values(byPin)) s += r.awardedPoints;
-    }
-    return s;
-  }, [scores]);
+  const totalScore = useMemo(
+    () => Object.values(scores).reduce((sum, s) => sum + s.awardedPoints, 0),
+    [scores],
+  );
 
   const activeIdx = activePinId ? pins.findIndex((p) => p.id === activePinId) : -1;
   const activePin = activeIdx >= 0 ? pins[activeIdx] : null;
-  const activeStop = plan && activeIdx >= 0 ? plan.stops[activeIdx] : null;
+  const activeStop = playMode && activeIdx >= 0 ? initialTrip!.stops[activeIdx] : null;
 
-  const uploadingCard = (() => {
-    if (!uploading || !plan) return null;
-    const pinIdx = pins.findIndex((p) => p.id === uploading.pinId);
-    if (pinIdx < 0) return null;
-    return plan.stops[pinIdx]?.cards[uploading.cardIdx] ?? null;
-  })();
-  const uploadingPin = uploading ? pins.find((p) => p.id === uploading.pinId) : null;
+  const uploadingCard = useMemo(() => {
+    if (!uploading || !initialTrip) return null;
+    for (const s of initialTrip.stops) {
+      const c = s.cards.find((c) => c.id === uploading.cardId);
+      if (c) return { card: c, stop: s };
+    }
+    return null;
+  }, [uploading, initialTrip]);
 
   return (
     <main className="grid h-screen w-screen grid-cols-1 bg-stone-100 dark:bg-stone-950 md:grid-cols-[1fr_28rem]">
@@ -158,7 +163,7 @@ export function Planner({ apiKey }: { apiKey: string | null }) {
             apiKey={apiKey}
             pins={pins}
             activePinId={activePinId}
-            editable={editable}
+            editable={!playMode}
             onAddPin={handleAddPin}
             onMovePin={handleMovePin}
             onSelectPin={handleSelectPin}
@@ -169,7 +174,6 @@ export function Planner({ apiKey }: { apiKey: string | null }) {
           </div>
         )}
 
-        {/* Branding + Score */}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4 sm:p-6">
           <Link
             href="/"
@@ -177,14 +181,10 @@ export function Planner({ apiKey }: { apiKey: string | null }) {
           >
             wanderdeck
           </Link>
-          {plan && (
+          {playMode && (
             <div className="pointer-events-auto rounded-2xl bg-white/85 px-4 py-2 shadow-lg backdrop-blur dark:bg-stone-900/85">
-              <p className="text-xs font-medium uppercase tracking-wider text-stone-500">
-                Score
-              </p>
-              <p className="text-xl font-semibold text-stone-900 dark:text-stone-50">
-                {totalScore}
-              </p>
+              <p className="text-xs font-medium uppercase tracking-wider text-stone-500">Score</p>
+              <p className="text-xl font-semibold text-stone-900 dark:text-stone-50">{totalScore}</p>
             </div>
           )}
         </div>
@@ -192,7 +192,7 @@ export function Planner({ apiKey }: { apiKey: string | null }) {
 
       {/* Sidebar */}
       <aside className="flex h-full flex-col overflow-hidden border-t border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 md:border-l md:border-t-0">
-        {!plan ? (
+        {!playMode ? (
           <BuilderSidebar
             pins={pins}
             activePinId={activePinId}
@@ -210,21 +210,20 @@ export function Planner({ apiKey }: { apiKey: string | null }) {
         ) : (
           <PlayerSidebar
             pins={pins}
-            plan={plan}
-            activePinId={activePinId}
+            stops={initialTrip!.stops}
             activePin={activePin}
             activeStop={activeStop}
             revealed={revealed}
             scores={scores}
             onSelectPin={setActivePinId}
-            onReveal={(pinId, cardIdx) =>
-              setRevealed((r) => ({
-                ...r,
-                [pinId]: { ...(r[pinId] ?? {}), [cardIdx]: true },
-              }))
+            onReveal={(cardId) =>
+              setRevealed((r) => {
+                const next = new Set(r);
+                next.add(cardId);
+                return next;
+              })
             }
-            onSubmitPhoto={(pinId, cardIdx) => setUploading({ pinId, cardIdx })}
-            onReset={handleReset}
+            onSubmitPhoto={(cardId) => setUploading({ cardId })}
           />
         )}
       </aside>
@@ -234,29 +233,21 @@ export function Planner({ apiKey }: { apiKey: string | null }) {
         onClose={() => setUploading(null)}
         onScored={(result) => {
           if (!uploading) return;
-          const { pinId, cardIdx } = uploading;
           setScores((s) => {
-            const existing = s[pinId]?.[cardIdx];
+            const existing = s[uploading.cardId];
             if (existing && existing.awardedPoints >= result.awardedPoints) return s;
-            return { ...s, [pinId]: { ...(s[pinId] ?? {}), [cardIdx]: result } };
+            return { ...s, [uploading.cardId]: result };
           });
           setUploading(null);
         }}
-        card={
+        cardId={uploading?.cardId ?? null}
+        cardSummary={
           uploadingCard
             ? {
-                title: uploadingCard.title,
-                scoringCriteria: uploadingCard.scoringCriteria,
-                revealedDescription: uploadingCard.revealedDescription,
-                basePoints: uploadingCard.basePoints,
-              }
-            : null
-        }
-        stop={
-          uploadingPin
-            ? {
-                name: uploadingPin.name || "Stop",
-                location: { lat: uploadingPin.lat, lng: uploadingPin.lng },
+                title: uploadingCard.card.title,
+                revealedDescription: uploadingCard.card.revealedDescription,
+                basePoints: uploadingCard.card.basePoints,
+                stopName: uploadingCard.stop.name,
               }
             : null
         }
@@ -266,7 +257,7 @@ export function Planner({ apiKey }: { apiKey: string | null }) {
 }
 
 // =============================================================
-// Builder sidebar — visible before "Generate cards" is pressed.
+// Builder sidebar
 // =============================================================
 
 function BuilderSidebar({
@@ -301,9 +292,7 @@ function BuilderSidebar({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <header className="border-b border-stone-200 px-6 py-5 dark:border-stone-800">
-        <p className="text-xs font-medium uppercase tracking-wider text-stone-500">
-          Build your trip
-        </p>
+        <p className="text-xs font-medium uppercase tracking-wider text-stone-500">Build your trip</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
           Drop pins, then tell us the vibe.
         </h1>
@@ -312,8 +301,8 @@ function BuilderSidebar({
       <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
         {pins.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 p-4 text-sm text-stone-600 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-400">
-            Tap anywhere on the map to drop a stop. Add as many as you like — the more
-            specific, the better the cards.
+            Tap anywhere on the map to drop a stop. Add as many as you like — the more specific, the
+            better the cards.
           </p>
         ) : (
           <ol className="space-y-2">
@@ -420,13 +409,12 @@ function BuilderSidebar({
 }
 
 // =============================================================
-// Player sidebar — visible after generation, shows cards per stop.
+// Player sidebar
 // =============================================================
 
 function PlayerSidebar({
   pins,
-  plan,
-  activePinId,
+  stops,
   activePin,
   activeStop,
   revealed,
@@ -434,36 +422,26 @@ function PlayerSidebar({
   onSelectPin,
   onReveal,
   onSubmitPhoto,
-  onReset,
 }: {
   pins: Pin[];
-  plan: GeneratedPlan;
-  activePinId: string | null;
+  stops: StoredTrip["stops"];
   activePin: Pin | null;
-  activeStop: GeneratedPlan["stops"][number] | null;
-  revealed: RevealedMap;
+  activeStop: StoredTrip["stops"][number] | null;
+  revealed: RevealedSet;
   scores: ScoreMap;
   onSelectPin: (id: string) => void;
-  onReveal: (pinId: string, cardIdx: number) => void;
-  onSubmitPhoto: (pinId: string, cardIdx: number) => void;
-  onReset: () => void;
+  onReveal: (cardId: string) => void;
+  onSubmitPhoto: (cardId: string) => void;
 }) {
-  // If nothing selected, default to first stop.
-  const selectedId = activePinId ?? pins[0]?.id ?? null;
-  if (selectedId && selectedId !== activePinId) {
-    // Schedule a microtask to update upstream — avoid synchronous render race.
-    queueMicrotask(() => onSelectPin(selectedId));
-  }
-
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex gap-1 overflow-x-auto border-b border-stone-200 px-3 py-3 dark:border-stone-800">
         {pins.map((pin, i) => {
-          const stopScore = Object.values(scores[pin.id] ?? {}).reduce(
-            (s, r) => s + r.awardedPoints,
+          const stopScore = stops[i].cards.reduce(
+            (sum, card) => sum + (scores[card.id]?.awardedPoints ?? 0),
             0,
           );
-          const isActive = pin.id === selectedId;
+          const isActive = pin.id === activePin?.id;
           return (
             <button
               key={pin.id}
@@ -476,7 +454,7 @@ function PlayerSidebar({
               }`}
             >
               <span>
-                {i + 1}. {pin.name || plan.stops[i]?.placeName || "Stop"}
+                {i + 1}. {stops[i].name}
               </span>
               {stopScore > 0 && (
                 <span className="rounded-full bg-emerald-500/20 px-1.5 text-[10px] text-emerald-700 dark:text-emerald-300">
@@ -492,31 +470,27 @@ function PlayerSidebar({
         {activePin && activeStop ? (
           <>
             <p className="text-xs font-medium uppercase tracking-wider text-stone-500">
-              Stop {pins.findIndex((p) => p.id === activePin.id) + 1}
+              Stop {activeStop.sequence + 1}
             </p>
             <h2 className="mt-1 text-2xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
-              {activeStop.placeName}
+              {activeStop.name}
             </h2>
             <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
               {activeStop.description}
             </p>
 
             <div className="mt-5 space-y-3">
-              {activeStop.cards.map((card, cardIdx) => {
-                const isRevealed = revealed[activePin.id]?.[cardIdx] ?? false;
-                const score = scores[activePin.id]?.[cardIdx];
-                return (
-                  <Card
-                    key={cardIdx}
-                    card={card}
-                    stopLocation={{ lat: activePin.lat, lng: activePin.lng }}
-                    revealed={isRevealed}
-                    score={score}
-                    onReveal={() => onReveal(activePin.id, cardIdx)}
-                    onPhoto={() => onSubmitPhoto(activePin.id, cardIdx)}
-                  />
-                );
-              })}
+              {activeStop.cards.map((card) => (
+                <Card
+                  key={card.id}
+                  card={card}
+                  stopLocation={{ lat: activePin.lat, lng: activePin.lng }}
+                  revealed={revealed.has(card.id)}
+                  score={scores[card.id]}
+                  onReveal={() => onReveal(card.id)}
+                  onPhoto={() => onSubmitPhoto(card.id)}
+                />
+              ))}
             </div>
           </>
         ) : (
@@ -525,17 +499,20 @@ function PlayerSidebar({
       </div>
 
       <footer className="border-t border-stone-200 px-6 py-4 dark:border-stone-800">
-        <button
-          type="button"
-          onClick={onReset}
-          className="w-full rounded-full border border-stone-300 py-2.5 text-sm font-medium text-stone-700 transition hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+        <Link
+          href="/plan"
+          className="block w-full rounded-full border border-stone-300 py-2.5 text-center text-sm font-medium text-stone-700 transition hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
         >
           Plan a new trip
-        </button>
+        </Link>
       </footer>
     </div>
   );
 }
+
+// =============================================================
+// Card with geo-gated reveal
+// =============================================================
 
 function Card({
   card,
@@ -545,7 +522,7 @@ function Card({
   onReveal,
   onPhoto,
 }: {
-  card: GeneratedPlan["stops"][number]["cards"][number];
+  card: StoredTrip["stops"][number]["cards"][number];
   stopLocation: LatLng;
   revealed: boolean;
   score?: ScoreResult;
@@ -626,9 +603,7 @@ function Card({
     if (gate.status === "no-location") {
       return (
         <div className="rounded-2xl border-2 border-dashed border-stone-300 bg-stone-50 p-5 dark:border-stone-700 dark:bg-stone-950">
-          <p className="text-xs font-medium uppercase tracking-wider text-stone-400">
-            Hidden card
-          </p>
+          <p className="text-xs font-medium uppercase tracking-wider text-stone-400">Hidden card</p>
           <p className="mt-2 text-base italic text-stone-700 dark:text-stone-300">
             &ldquo;{card.hiddenHint}&rdquo;
           </p>
@@ -679,9 +654,7 @@ function Card({
           {card.basePoints} pts
         </span>
       </div>
-      <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
-        {card.revealedDescription}
-      </p>
+      <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">{card.revealedDescription}</p>
       <p className="mt-3 text-xs text-stone-500">
         <span className="font-medium uppercase tracking-wider">Photo brief:</span>{" "}
         {card.scoringCriteria}
@@ -738,7 +711,8 @@ function ScoreReadout({ score, basePoints }: { score: ScoreResult; basePoints: n
         </span>
       </div>
       <p className="mt-1 text-xs text-stone-600 dark:text-stone-400">
-        Activity {Math.round(score.activityScore * 100)}% · Location {Math.round(score.locationScore * 100)}% · {distance}
+        Activity {Math.round(score.activityScore * 100)}% · Location {Math.round(score.locationScore * 100)}% ·{" "}
+        {distance}
       </p>
       <p className="mt-2 text-xs text-stone-700 dark:text-stone-300">{score.reasoning}</p>
     </div>

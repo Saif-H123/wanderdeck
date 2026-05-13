@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { generateActivityCards } from "@/lib/ai/claude";
+import { createTrip } from "@/lib/db/trips";
 
 export const maxDuration = 120;
 
@@ -32,7 +33,13 @@ export async function POST(req: NextRequest) {
         { status: 502 },
       );
     }
-    return Response.json({ plan: result.parsed_output });
+    const plan = result.parsed_output;
+    const { slug } = await createTrip({
+      vibe: parsed.data.vibe,
+      pins: parsed.data.stops,
+      plan,
+    });
+    return Response.json({ slug, plan });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return Response.json({ error: message }, { status: 500 });

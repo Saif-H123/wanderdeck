@@ -4,6 +4,8 @@ import exifr from "exifr";
 import { classifyPhoto } from "@/lib/ai/gemini";
 import { scorePhoto } from "@/lib/ai/claude";
 import { bestDistanceMeters, computeAwardedPoints, gradeActivity } from "@/lib/scoring";
+import { supabaseServer } from "@/lib/db/supabase";
+import { recordSubmission } from "@/lib/db/trips";
 
 export const maxDuration = 60;
 
@@ -13,14 +15,9 @@ const LatLng = z.object({
 });
 
 const Body = z.object({
+  cardId: z.string().uuid(),
   imageBase64: z.string().min(1),
   mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
-  card: z.object({
-    title: z.string(),
-    scoringCriteria: z.string(),
-    basePoints: z.number().int().positive(),
-  }),
-  stop: LatLng,
   uploadLocation: LatLng.nullable(),
 });
 
@@ -29,8 +26,25 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { imageBase64, mimeType, card, stop, uploadLocation } = parsed.data;
+  const { cardId, imageBase64, mimeType, uploadLocation } = parsed.data;
 
+  // Fetch the card and its stop from the DB. Single source of truth for
+  // criteria + location — clients can't fake scoring by sending different
+  // criteria than what was stored.
+  const sb = supabaseServer();
+  const { data: card, error: cardErr } = await sb
+    .from("activity_cards")
+    .select("id, title, scoring_criteria, base_points, stop_id, trip_stops(lat, lng)")
+    .eq("id", cardId)
+    .maybeSingle();
+  if (cardErr) return Response.json({ error: cardErr.message }, { status: 500 });
+  if (!card) return Response.json({ error: "Card not found" }, { status: 404 });
+
+  const stopJoin = (card.trip_stops as unknown) as { lat: number; lng: number } | null;
+  if (!stopJoin) return Response.json({ error: "Stop not found for card" }, { status: 500 });
+  const stop = { lat: Number(stopJoin.lat), lng: Number(stopJoin.lng) };
+
+  // EXIF GPS extraction.
   const imageBuffer = Buffer.from(imageBase64, "base64");
   const exifGps = await exifr.gps(imageBuffer).catch(() => null);
   const photoLocation =
@@ -44,63 +58,76 @@ export async function POST(req: NextRequest) {
     photo: photoLocation,
   });
 
-  // Cheap first-pass: if Gemini is confident the photo isn't the right
-  // subject, skip the (more expensive) Claude judgement.
+  // Cheap first-pass: Gemini reject for obvious wrong-subject photos.
   const firstPass = await classifyPhoto({
     imageBase64,
     mimeType,
     expectedSubject: card.title,
   }).catch(() => null);
+
+  let activityScore = 0;
+  let matches = false;
+  let reasoning = "";
+
   if (firstPass?.text?.toLowerCase().includes('"plausible": false')) {
-    const { awardedPoints, locationScore } = computeAwardedPoints({
-      basePoints: card.basePoints,
-      activityScore: 0,
+    reasoning = "Quick first-pass: the photo doesn't appear to show the expected subject.";
+  } else {
+    const judgement = await scorePhoto({
+      imageBase64,
+      mimeType,
+      card: {
+        title: card.title,
+        scoringCriteria: card.scoring_criteria,
+        basePoints: card.base_points,
+      },
+    }).catch(() => null);
+
+    if (!judgement?.parsed_output) {
+      return Response.json({ error: "Scoring model returned malformed output" }, { status: 502 });
+    }
+    const j = judgement.parsed_output;
+    const graded = gradeActivity({ matches: j.matches, confidence: j.confidence });
+    activityScore = graded.activityScore;
+    matches = graded.matches;
+    reasoning = j.reasoning;
+  }
+
+  const { awardedPoints, locationScore } = computeAwardedPoints({
+    basePoints: card.base_points,
+    activityScore,
+    distanceMeters,
+  });
+
+  // Persist the submission + upload photo.
+  try {
+    const stored = await recordSubmission({
+      cardId,
+      matches: matches && awardedPoints > 0,
+      activityScore,
+      locationScore,
+      awardedPoints,
       distanceMeters,
+      uploadLat: uploadLocation?.lat ?? null,
+      uploadLng: uploadLocation?.lng ?? null,
+      photoLat: photoLocation?.lat ?? null,
+      photoLng: photoLocation?.lng ?? null,
+      reasoning,
+      imageBuffer,
+      mimeType,
     });
+
     return Response.json({
-      matches: false,
-      activityScore: 0,
+      submissionId: stored.submissionId,
+      matches: matches && awardedPoints > 0,
+      activityScore,
       locationScore,
       awardedPoints,
       distanceMeters,
       photoLocation,
-      reasoning: "Quick first-pass: the photo doesn't appear to show the expected subject.",
+      reasoning,
     });
-  }
-
-  let judgement;
-  try {
-    judgement = await scorePhoto({ imageBase64, mimeType, card });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return Response.json({ error: message }, { status: 500 });
   }
-
-  if (!judgement.parsed_output) {
-    return Response.json(
-      { error: "Model returned malformed judgement", stopReason: judgement.stop_reason },
-      { status: 502 },
-    );
-  }
-
-  const { matches: claudeMatches, confidence, reasoning } = judgement.parsed_output;
-  const { activityScore, matches } = gradeActivity({
-    matches: claudeMatches,
-    confidence,
-  });
-  const { awardedPoints, locationScore } = computeAwardedPoints({
-    basePoints: card.basePoints,
-    activityScore,
-    distanceMeters,
-  });
-
-  return Response.json({
-    matches: matches && awardedPoints > 0,
-    activityScore,
-    locationScore,
-    awardedPoints,
-    distanceMeters,
-    photoLocation,
-    reasoning,
-  });
 }

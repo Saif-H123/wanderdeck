@@ -17,19 +17,19 @@ export function PhotoUploadModal({
   open,
   onClose,
   onScored,
-  card,
-  stop,
+  cardId,
+  cardSummary,
 }: {
   open: boolean;
   onClose: () => void;
   onScored: (result: ScoreResult) => void;
-  card: {
+  cardId: string | null;
+  cardSummary: {
     title: string;
-    scoringCriteria: string;
     revealedDescription: string;
     basePoints: number;
+    stopName: string;
   } | null;
-  stop: { name: string; location: LatLng } | null;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -76,7 +76,7 @@ export function PhotoUploadModal({
   }
 
   async function handleSubmit() {
-    if (!file || !card || !stop) return;
+    if (!file || !cardId) return;
     setSubmitting(true);
     setError(null);
 
@@ -88,14 +88,9 @@ export function PhotoUploadModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          cardId,
           imageBase64,
           mimeType,
-          card: {
-            title: card.title,
-            scoringCriteria: card.scoringCriteria,
-            basePoints: card.basePoints,
-          },
-          stop: stop.location,
           uploadLocation,
         }),
       });
@@ -112,20 +107,20 @@ export function PhotoUploadModal({
     }
   }
 
-  if (!open || !card || !stop) return null;
+  if (!open || !cardId || !cardSummary) return null;
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-stone-950/50 p-4 backdrop-blur-sm">
       <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-stone-900">
         <div className="border-b border-stone-200 p-6 dark:border-stone-800">
           <p className="text-xs font-medium uppercase tracking-wider text-stone-500">
-            {stop.name}
+            {cardSummary.stopName}
           </p>
           <h2 className="mt-1 text-xl font-semibold text-stone-900 dark:text-stone-50">
-            {card.title}
+            {cardSummary.title}
           </h2>
           <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
-            {card.revealedDescription}
+            {cardSummary.revealedDescription}
           </p>
         </div>
 
@@ -209,7 +204,6 @@ function fileToBase64(file: File): Promise<string> {
     reader.onload = () => {
       const result = reader.result;
       if (typeof result !== "string") return reject(new Error("Bad file read"));
-      // strip "data:image/...;base64," prefix
       const comma = result.indexOf(",");
       resolve(comma >= 0 ? result.slice(comma + 1) : result);
     };
