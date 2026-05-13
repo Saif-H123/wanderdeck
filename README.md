@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# wanderdeck
 
-## Getting Started
+Describe a trip in plain English. wanderdeck plans the route, the stops, and a deck of hidden activity cards. At each stop you pick up a card, see what it asks for, snap a photo — AI scores it.
 
-First, run the development server:
+## The idea
+
+Two layers:
+
+1. **Route layer** — an AI-generated itinerary from your description (origin → destination, with stops that match your vibe).
+2. **Game layer** — each stop has hidden activity cards. You don't know what's on them until you flip. Submit a photo that matches the card's criteria and earn points.
+
+## Stack
+
+- Next.js 16 (App Router) + TypeScript + Tailwind 4
+- Google Maps (Directions for routing, JS API for the map)
+- Claude (vision scoring + structured itinerary reasoning) + Gemini (cheap first-pass image classification)
+- Supabase (auth + Postgres + storage for photo uploads)
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+cp .env.example .env.local   # fill in keys
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Required env keys (see `.env.example`):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` + `GOOGLE_MAPS_SERVER_KEY`
+- `ANTHROPIC_API_KEY`
+- `GEMINI_API_KEY`
+- `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` + `SUPABASE_SERVICE_ROLE_KEY`
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Layout
 
-## Learn More
+```
+src/
+  app/
+    page.tsx              landing
+    plan/page.tsx         trip-description form
+    trip/[id]/page.tsx    map + card deck for a generated trip
+    api/
+      plan/route.ts       POST: prompt + origin/destination -> itinerary
+      score-photo/route.ts  POST: image + card -> score
+  lib/
+    ai/claude.ts          itinerary + photo scoring
+    ai/gemini.ts          first-pass image classification
+    db/supabase.ts        client/server Supabase clients
+    types.ts              Trip / TripStop / ActivityCard / PhotoScore
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Status
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Scaffold only — UI stubs, AI client wiring, route handlers. Next up: real schema, map view, card-reveal mechanic, photo upload flow.
