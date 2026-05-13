@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditableMap, type Pin } from "./EditableMap";
 import { PhotoUploadModal, type ScoreResult } from "./PhotoUploadModal";
 import type { LatLng } from "@/lib/types";
@@ -18,6 +18,14 @@ const makeId = () => Math.random().toString(36).slice(2, 10);
 
 type RevealedSet = Set<string>; // set of card.id strings
 type ScoreMap = Record<string, ScoreResult>; // keyed by card.id
+
+type ChatMessage = { role: "user" | "assistant"; content: string };
+
+const OPENER: ChatMessage = {
+  role: "assistant",
+  content:
+    "What's this trip about? Tell me the vibe — who's going, what kind of pace, anything you really don't want.",
+};
 
 export function Planner({
   apiKey,
@@ -40,7 +48,9 @@ export function Planner({
   const [activePinId, setActivePinId] = useState<string | null>(
     initialTrip?.stops[0]?.id ?? null,
   );
-  const [vibe, setVibe] = useState(initialTrip?.vibe ?? "");
+  const [messages, setMessages] = useState<ChatMessage[]>([OPENER]);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatReady, setChatReady] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -156,8 +166,57 @@ export function Planner({
       return next;
     });
 
+  const handleSendMessage = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || chatBusy) return;
+    const userMsg: ChatMessage = { role: "user", content: trimmed };
+    const nextMessages = [...messages, userMsg];
+    setMessages(nextMessages);
+    setChatBusy(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: nextMessages,
+          pins: pins.map((p) => ({
+            name: p.name,
+            caption: p.caption ?? null,
+            lat: p.lat,
+            lng: p.lng,
+          })),
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error?.message ?? body.error ?? `Chat failed (${res.status})`);
+      }
+      const { assistantMessage, readyToGenerate } = (await res.json()) as {
+        assistantMessage: string;
+        readyToGenerate: boolean;
+      };
+      setMessages((prev) => [...prev, { role: "assistant", content: assistantMessage }]);
+      if (readyToGenerate) setChatReady(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
   const handleGenerate = async () => {
-    if (pins.length < 1 || vibe.trim().length < 5) return;
+    if (pins.length < 1) return;
+    // Serialize transcript as the vibe input. Claude's chat questions are
+    // preserved so generateActivityCards has full context for what the
+    // user's answers meant.
+    const vibe = messages
+      .filter((m) => m !== OPENER || messages.length > 1) // skip the bare opener if untouched
+      .map((m) => `${m.role === "user" ? "User" : "Planner"}: ${m.content}`)
+      .join("\n");
+
+    if (vibe.trim().length < 5) return;
     setGenerating(true);
     setError(null);
     try {
@@ -243,7 +302,9 @@ export function Planner({
           <BuilderSidebar
             pins={pins}
             activePinId={activePinId}
-            vibe={vibe}
+            messages={messages}
+            chatBusy={chatBusy}
+            chatReady={chatReady}
             generating={generating}
             error={error}
             onSelectPin={setActivePinId}
@@ -251,7 +312,7 @@ export function Planner({
             onDeletePin={handleDeletePin}
             onMoveUp={movePinUp}
             onMoveDown={movePinDown}
-            onVibeChange={setVibe}
+            onSendMessage={handleSendMessage}
             onGenerate={handleGenerate}
           />
         ) : (
@@ -310,7 +371,9 @@ export function Planner({
 function BuilderSidebar({
   pins,
   activePinId,
-  vibe,
+  messages,
+  chatBusy,
+  chatReady,
   generating,
   error,
   onSelectPin,
@@ -318,12 +381,14 @@ function BuilderSidebar({
   onDeletePin,
   onMoveUp,
   onMoveDown,
-  onVibeChange,
+  onSendMessage,
   onGenerate,
 }: {
   pins: Pin[];
   activePinId: string | null;
-  vibe: string;
+  messages: ChatMessage[];
+  chatBusy: boolean;
+  chatReady: boolean;
   generating: boolean;
   error: string | null;
   onSelectPin: (id: string) => void;
@@ -331,10 +396,10 @@ function BuilderSidebar({
   onDeletePin: (id: string) => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
-  onVibeChange: (v: string) => void;
+  onSendMessage: (text: string) => void;
   onGenerate: () => void;
 }) {
-  const canGenerate = pins.length >= 1 && vibe.trim().length >= 5 && !generating;
+  const canGenerate = pins.length >= 1 && chatReady && !generating;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -421,18 +486,12 @@ function BuilderSidebar({
           </ol>
         )}
 
-        <div>
-          <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-stone-500">
-            Your vibe
-          </label>
-          <textarea
-            value={vibe}
-            onChange={(e) => onVibeChange(e.target.value)}
-            rows={4}
-            placeholder="e.g. slow road trip, weird roadside attractions, good coffee, no tourist traps"
-            className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950 dark:text-stone-50"
-          />
-        </div>
+        <ChatPanel
+          messages={messages}
+          chatBusy={chatBusy}
+          chatReady={chatReady}
+          onSend={onSendMessage}
+        />
 
         {error && (
           <p className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
@@ -450,12 +509,124 @@ function BuilderSidebar({
         >
           {generating ? "Generating cards…" : "Generate cards"}
         </button>
-        {generating && (
-          <p className="mt-2 text-center text-xs text-stone-500">
-            Claude is working — usually 20–40 seconds.
-          </p>
-        )}
+        <p className="mt-2 text-center text-xs text-stone-500">
+          {generating
+            ? "Claude is working — usually 20–40 seconds."
+            : pins.length === 0
+              ? "Drop a pin to begin."
+              : !chatReady
+                ? "Tell us a bit more about the trip first."
+                : "Ready when you are."}
+        </p>
       </footer>
+    </div>
+  );
+}
+
+// =============================================================
+// Chat panel — replaces the old vibe textarea
+// =============================================================
+
+function ChatPanel({
+  messages,
+  chatBusy,
+  chatReady,
+  onSend,
+}: {
+  messages: ChatMessage[];
+  chatBusy: boolean;
+  chatReady: boolean;
+  onSend: (text: string) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to latest message.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, chatBusy]);
+
+  const handleSend = () => {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    onSend(trimmed);
+    setDraft("");
+  };
+
+  return (
+    <div>
+      <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-stone-500">
+        Tell us about the trip
+      </label>
+      <div className="overflow-hidden rounded-2xl border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-950">
+        <div
+          ref={scrollRef}
+          className="max-h-72 space-y-2 overflow-y-auto px-3 py-3 text-sm"
+        >
+          {messages.map((m, i) => (
+            <div
+              key={i}
+              className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={`max-w-[85%] rounded-2xl px-3 py-2 leading-relaxed ${
+                  m.role === "user"
+                    ? "bg-stone-900 text-white dark:bg-stone-50 dark:text-stone-900"
+                    : "bg-white text-stone-800 shadow-sm dark:bg-stone-800 dark:text-stone-100"
+                }`}
+              >
+                {m.content}
+              </div>
+            </div>
+          ))}
+          {chatBusy && (
+            <div className="flex justify-start">
+              <div className="rounded-2xl bg-white px-3 py-2 shadow-sm dark:bg-stone-800">
+                <span className="inline-flex gap-1">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-stone-400 [animation-delay:-0.3s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-stone-400 [animation-delay:-0.15s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-stone-400" />
+                </span>
+              </div>
+            </div>
+          )}
+          {chatReady && !chatBusy && (
+            <div className="flex justify-center">
+              <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                Ready to generate
+              </span>
+            </div>
+          )}
+        </div>
+        <div className="border-t border-stone-200 bg-white p-2 dark:border-stone-800 dark:bg-stone-900">
+          <div className="flex items-center gap-2">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              disabled={chatBusy}
+              placeholder={chatBusy ? "Thinking…" : "Type a reply…"}
+              className="min-w-0 flex-1 bg-transparent px-2 py-1.5 text-sm text-stone-900 placeholder-stone-400 outline-none disabled:opacity-50 dark:text-stone-50"
+            />
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={chatBusy || draft.trim() === ""}
+              aria-label="Send"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-900 text-white transition hover:bg-stone-700 disabled:opacity-30 dark:bg-stone-50 dark:text-stone-900 dark:hover:bg-stone-200"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M5 12h14M13 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
