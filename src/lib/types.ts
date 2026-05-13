@@ -1,12 +1,26 @@
 export type LatLng = { lat: number; lng: number };
 
+export type TripStatus = "planning" | "active" | "completed" | "abandoned";
+
+export type Trip = {
+  id: string;
+  userId: string;
+  prompt: string;
+  status: TripStatus;
+  origin: LatLng & { label: string };
+  destination: LatLng & { label: string };
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type TripStop = {
   id: string;
+  tripId: string;
+  sequence: number;
   name: string;
   description: string;
   location: LatLng;
-  arrivalEstimate?: string;
-  cards: ActivityCard[];
+  arrivalEstimate: string | null;
 };
 
 export type ActivityCard = {
@@ -17,24 +31,42 @@ export type ActivityCard = {
   revealedDescription: string;
   scoringCriteria: string;
   basePoints: number;
-  revealed: boolean;
-  completed: boolean;
+  revealedAt: string | null;
+  completedAt: string | null;
 };
 
-export type Trip = {
+export type CardSubmission = {
   id: string;
-  userId: string;
-  prompt: string;
-  origin: LatLng;
-  destination: LatLng;
-  stops: TripStop[];
-  createdAt: string;
-};
-
-export type PhotoScore = {
   cardId: string;
+  userId: string;
+  photoPath: string;
   matches: boolean;
   confidence: number;
   awardedPoints: number;
-  reasoning: string;
+  aiReasoning: string;
+  submittedAt: string;
+};
+
+// Convenience nested shape for `/trip/[id]` page.
+export type TripWithDetails = Trip & {
+  stops: (TripStop & {
+    cards: ActivityCard[];
+  })[];
+};
+
+// AI -> DB shape for what Claude returns from /api/plan
+export type GeneratedPlan = {
+  stops: {
+    name: string;
+    description: string;
+    location: LatLng;
+    arrivalEstimate?: string;
+    cards: {
+      title: string;
+      hiddenHint: string;
+      revealedDescription: string;
+      scoringCriteria: string;
+      basePoints: number;
+    }[];
+  }[];
 };

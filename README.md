@@ -24,6 +24,15 @@ cp .env.example .env.local   # fill in keys
 pnpm dev
 ```
 
+### Database
+
+Schema lives in [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql). To apply:
+
+- **Hosted Supabase** — paste the migration into the SQL editor, or run `supabase db push` with the [Supabase CLI](https://supabase.com/docs/guides/cli) linked to your project.
+- **Local dev** — `supabase start` then `supabase db reset`.
+
+The schema has four tables (`trips`, `trip_stops`, `activity_cards`, `card_submissions`) with RLS so users only see their own trips, plus a private `card-photos` storage bucket scoped by `auth.uid()` folder prefix.
+
 Required env keys (see `.env.example`):
 
 - `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` + `GOOGLE_MAPS_SERVER_KEY`
@@ -46,7 +55,9 @@ src/
     ai/claude.ts          itinerary + photo scoring
     ai/gemini.ts          first-pass image classification
     db/supabase.ts        client/server Supabase clients
-    types.ts              Trip / TripStop / ActivityCard / PhotoScore
+    types.ts              Trip / TripStop / ActivityCard / CardSubmission
+supabase/
+  migrations/0001_init.sql  schema + RLS + storage bucket
 ```
 
 ## Status
