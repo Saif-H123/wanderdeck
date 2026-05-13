@@ -6,70 +6,69 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const MODEL = "claude-opus-4-7";
 
+// =============================================================
+// Itinerary card generation (pin-driven flow)
+// =============================================================
+
+const CardSchema = z.object({
+  title: z.string().describe("Short title for the activity (3-6 words)."),
+  hiddenHint: z
+    .string()
+    .describe(
+      "The pre-reveal teaser. Vague, evocative, no spoilers. Example: 'something cold and blue'.",
+    ),
+  revealedDescription: z
+    .string()
+    .describe("The full activity, revealed after the player picks up the card."),
+  scoringCriteria: z
+    .string()
+    .describe(
+      "Concrete photo criteria the AI grader will judge against. Be precise about what must be in the frame.",
+    ),
+  basePoints: z.number().int().min(50).max(500),
+});
+
+const StopWithCardsSchema = z.object({
+  placeName: z
+    .string()
+    .describe(
+      "Identify what's actually at this lat/lng — a named place, neighbourhood, landmark, or rough description (e.g. 'Forest near Loch Ness'). Use the user-provided name if it's already specific.",
+    ),
+  description: z
+    .string()
+    .describe("One or two sentences on the character of this spot, tuned to the user's vibe."),
+  cards: z.array(CardSchema).min(2).max(4),
+});
+
 const PlanSchema = z.object({
-  stops: z
-    .array(
-      z.object({
-        name: z.string().describe("Short, recognisable name for the stop."),
-        description: z
-          .string()
-          .describe("One or two sentences on why we're stopping here, tuned to the user's vibe."),
-        location: z.object({
-          lat: z.number().min(-90).max(90),
-          lng: z.number().min(-180).max(180),
-        }),
-        arrivalEstimate: z
-          .string()
-          .describe('Loose ETA from origin, e.g. "~2h drive" or "afternoon".'),
-        cards: z
-          .array(
-            z.object({
-              title: z.string().describe("Short title for the activity (3-6 words)."),
-              hiddenHint: z
-                .string()
-                .describe(
-                  "The pre-reveal teaser — vague, evocative, no spoilers (e.g. 'something cold and blue').",
-                ),
-              revealedDescription: z
-                .string()
-                .describe("The full activity, revealed after the player picks up the card."),
-              scoringCriteria: z
-                .string()
-                .describe(
-                  "Concrete photo criteria the AI will judge against (e.g. 'a clear shot of the glacier with the player or a personal object visible in-frame').",
-                ),
-              basePoints: z.number().int().min(50).max(500),
-            }),
-          )
-          .min(2)
-          .max(4),
-      }),
-    )
-    .min(2)
-    .max(6),
+  stops: z.array(StopWithCardsSchema).min(1).max(8),
 });
 
 export type GeneratedPlan = z.infer<typeof PlanSchema>;
+export type GeneratedStop = z.infer<typeof StopWithCardsSchema>;
 
-const PLAN_SYSTEM = `You design opinionated travel itineraries with a "hidden activity card" game layer.
+const PLAN_SYSTEM = `You are designing activity cards for a trip where the user has already chosen the stops by dropping pins on a map.
 
-For each trip:
-- Pick 2-6 stops between origin and destination that match the user's vibe. Order them by sensible travel sequence.
-- For each stop, write 2-4 activity cards. Each card has:
-  - A vague, evocative \`hiddenHint\` (what the player sees on the back of the card — no spoilers).
+For each stop:
+- Identify what's actually at the lat/lng (use the user's name if given, or your own knowledge of the location).
+- Write a short description that captures the character of the spot, tuned to the user's vibe.
+- Generate 2-4 activity cards. Each card has:
+  - A short title (3-6 words).
+  - A vague, evocative \`hiddenHint\` (what the player sees before they pick the card up). No spoilers.
   - A clear \`revealedDescription\` (what the activity actually is).
-  - \`scoringCriteria\` — concrete things the photo must show for it to score (subject, framing, anything specific). The criteria is used by an AI image grader, so be precise about what counts.
+  - \`scoringCriteria\` — concrete things the photo must show. An AI image grader will judge against this, so be precise.
   - \`basePoints\` — 50-500. Harder, more distinctive activities score higher.
 
-Latitude/longitude must be real coordinates accurate to within a few hundred meters of the actual stop — the game grades players on physical proximity.
+Activities should feel handmade for this user's vibe, not generic tourist stuff. Lean into the specific. The number and order of stops in your output must match the input exactly.`;
 
-Activities should feel handmade for this user's prompt, not generic "see the famous tower". Lean into the specific.`;
-
-export async function generateItinerary(input: {
-  prompt: string;
-  origin: string;
-  destination: string;
+export async function generateActivityCards(input: {
+  vibe: string;
+  stops: { name: string; lat: number; lng: number }[];
 }) {
+  const stopList = input.stops
+    .map((s, i) => `${i + 1}. "${s.name || "(unnamed)"}" at lat=${s.lat.toFixed(5)}, lng=${s.lng.toFixed(5)}`)
+    .join("\n");
+
   const result = await client.messages.parse({
     model: MODEL,
     max_tokens: 8192,
@@ -82,12 +81,16 @@ export async function generateItinerary(input: {
     messages: [
       {
         role: "user",
-        content: `Origin: ${input.origin}\nDestination: ${input.destination}\n\nUser's vibe / what they want from this trip:\n${input.prompt}`,
+        content: `User's vibe:\n${input.vibe}\n\nStops (in order):\n${stopList}\n\nGenerate the activity cards.`,
       },
     ],
   });
   return result;
 }
+
+// =============================================================
+// Photo scoring (unchanged from before)
+// =============================================================
 
 const PhotoJudgementSchema = z.object({
   matches: z
@@ -112,8 +115,7 @@ const SCORE_SYSTEM = `You grade whether a user-submitted photo satisfies an acti
 Be encouraging but honest:
 - If the right subject is clearly in the frame, mark matches=true even if the photo isn't perfect — composition, lighting, and amateur framing should not punish the player.
 - If the photo is the wrong subject entirely, or shows none of the criteria, mark matches=false.
-- Confidence reflects how clearly the criteria are met. 0.7+ for solid, 0.4-0.7 for "close enough", below 0.4 means it's borderline.
-- Calibrate to the criteria. Hard, specific criteria deserve higher bars than vague ones.`;
+- Confidence reflects how clearly the criteria are met. 0.7+ for solid, 0.4-0.7 for "close enough", below 0.4 means it's borderline.`;
 
 export async function scorePhoto(input: {
   imageBase64: string;

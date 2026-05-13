@@ -1,13 +1,21 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { generateItinerary } from "@/lib/ai/claude";
+import { generateActivityCards } from "@/lib/ai/claude";
 
 export const maxDuration = 120;
 
 const Body = z.object({
-  prompt: z.string().min(10),
-  origin: z.string().min(1),
-  destination: z.string().min(1),
+  vibe: z.string().min(5),
+  stops: z
+    .array(
+      z.object({
+        name: z.string(),
+        lat: z.number().min(-90).max(90),
+        lng: z.number().min(-180).max(180),
+      }),
+    )
+    .min(1)
+    .max(8),
 });
 
 export async function POST(req: NextRequest) {
@@ -17,7 +25,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await generateItinerary(parsed.data);
+    const result = await generateActivityCards(parsed.data);
     if (!result.parsed_output) {
       return Response.json(
         { error: "Model returned malformed output", stopReason: result.stop_reason },

@@ -3,30 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
 import { FEATURED_LOCATIONS, type FeaturedLocation } from "@/lib/seed-locations";
-
-// Cream land, blue water — strong contrast so the pins read clearly.
-const MAP_STYLE: google.maps.MapTypeStyle[] = [
-  { elementType: "labels.text.fill", stylers: [{ color: "#57534e" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#fafaf9" }] },
-  { featureType: "administrative.country", elementType: "geometry.stroke", stylers: [{ color: "#a8a29e" }] },
-  { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#efe9da" }] },
-  { featureType: "landscape.man_made", elementType: "geometry", stylers: [{ color: "#efe9da" }] },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "road", stylers: [{ visibility: "off" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#b4dcec" }] },
-  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#5fa9c4" }] },
-];
-
-// Custom SVG pin — small filled circle, off-black on cream.
-const PIN_ICON = (selected: boolean): google.maps.Symbol => ({
-  path: google.maps.SymbolPath.CIRCLE,
-  fillColor: "#1c1917",
-  fillOpacity: 1,
-  strokeColor: "#fafaf9",
-  strokeWeight: 2,
-  scale: selected ? 9 : 7,
-});
+import { ATLAS_STYLE, dotPinIcon } from "@/lib/map-style";
 
 export function WorldMap({
   apiKey,
@@ -58,7 +35,8 @@ export function WorldMap({
           maxZoom: 5,
           disableDefaultUI: true,
           gestureHandling: "greedy",
-          styles: MAP_STYLE,
+          styles: ATLAS_STYLE,
+          clickableIcons: false,
         });
         mapRef.current = map;
 
@@ -67,7 +45,7 @@ export function WorldMap({
             map,
             position: loc.location,
             title: loc.name,
-            icon: PIN_ICON(false),
+            icon: dotPinIcon(false),
           });
           marker.addListener("click", () => onSelect(loc));
           markersRef.current.push(marker);
@@ -90,7 +68,7 @@ export function WorldMap({
     if (!ready || !mapRef.current) return;
     markersRef.current.forEach((marker, i) => {
       const loc = FEATURED_LOCATIONS[i];
-      marker.setIcon(PIN_ICON(loc.slug === selectedSlug));
+      marker.setIcon(dotPinIcon(loc.slug === selectedSlug));
     });
     if (selectedSlug) {
       const loc = FEATURED_LOCATIONS.find((l) => l.slug === selectedSlug);
